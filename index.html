@@ -810,6 +810,17 @@ function renderAll(){renderTopSummary(); renderRecent();}
 renderAll();
 // 開啟 App 時，若已設定雲端就自動拉一次最新資料
 if(cloudCfg.url && cloudCfg.auto!==false) cloudSync(true);
+
+// 每次「切回 App」就自動同步一次（手機從主畫面點開、電腦切回分頁）
+let focusSyncTimer=null;
+function autoPull(){
+  if(!cloudCfg.url || cloudCfg.auto===false) return;
+  if(Date.now()-(cloudCfg.lastSync||0) < 3000) return; // 剛同步過就跳過，避免重複
+  clearTimeout(focusSyncTimer);
+  focusSyncTimer=setTimeout(()=>cloudSync(true), 400);
+}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) autoPull(); });
+window.addEventListener('focus', autoPull);
 </script>
 </body>
 </html>
