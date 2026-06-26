@@ -704,6 +704,13 @@ function autoSync(){
   syncTimer=setTimeout(()=>cloudSync(true), 1500); // 動作後 1.5 秒自動同步，避免連續操作狂打
 }
 function setSyncStatus(t){ const el=$('syncStatus'); if(el) el.textContent=t; }
+// 把雲端可能傳回的長日期字串（Sat Jun 27 2026…）正規化成 YYYY-MM-DD
+function normDate(s){
+  if(!s) return ymd(new Date());
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d=new Date(s);
+  return isNaN(d)? String(s) : ymd(d);
+}
 function fmtTime(ts){ if(!ts)return '尚未同步'; const d=new Date(ts);
   return d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 
@@ -748,7 +755,9 @@ async function cloudSync(silent){
     const res=await fetch(q);
     const data=await res.json();
     if(data.error) throw new Error(data.error);
-    const merged=mergeData(records, tombstones, data.records||[], data.tombstones||[]);
+    // 試算表可能把日期轉成長字串，這裡統一正規化回 YYYY-MM-DD
+    const cloudRecs=(data.records||[]).map(r=>({...r, date:normDate(r.date)}));
+    const merged=mergeData(records, tombstones, cloudRecs, data.tombstones||[]);
     const mergedSettings=mergeSettings(settings, data.settings);
     const body=JSON.stringify({action:'push', token:cloudCfg.token||'', records:merged.records, settings:mergedSettings, tombstones:merged.tombstones});
     const pres=await fetch(base,{method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body});
