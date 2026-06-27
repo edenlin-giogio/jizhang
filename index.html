@@ -114,6 +114,40 @@
   .page{display:none;} .page.on{display:block;}
   .toast{position:fixed; bottom:90px; left:50%; transform:translateX(-50%); background:#000; color:#fff; padding:10px 18px; border-radius:30px; font-size:14px; opacity:0; transition:.25s; z-index:50; pointer-events:none;}
   .toast.show{opacity:.95;}
+
+  /* 預算進度條 */
+  .budget{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px 14px; margin-bottom:16px;}
+  .budget .row{display:flex; justify-content:space-between; align-items:baseline; font-size:14px; margin-bottom:7px;}
+  .budget .row .left{color:var(--sub);}
+  .budget .row .right{font-weight:700;}
+  .budget .track{height:10px; background:var(--card2); border-radius:6px; overflow:hidden;}
+  .budget .fill{height:100%; border-radius:6px; transition:width .3s;}
+  .budget.over .right{color:var(--red);}
+
+  /* 搜尋與篩選 */
+  .searchbar{display:flex; gap:8px; margin:6px 0 10px;}
+  .searchbar input{flex:1; background:var(--card2); color:var(--txt); border:1px solid var(--line); border-radius:12px; padding:9px 13px; font-size:15px; outline:none;}
+  .fchips{display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;}
+  .fchip{padding:6px 12px; border-radius:18px; background:var(--card2); border:1px solid var(--line); font-size:13px; color:var(--sub); cursor:pointer;}
+  .fchip.on{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .rec{cursor:pointer;}
+
+  /* 底部彈出表單／清單（sheet） */
+  .sheetbg{position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:60; display:none;}
+  .sheetbg.show{display:block;}
+  .sheet{position:fixed; left:0; right:0; bottom:0; max-width:540px; margin:0 auto; background:var(--card); border-radius:20px 20px 0 0; border:1px solid var(--line); z-index:61; transform:translateY(100%); transition:transform .25s; max-height:88vh; overflow-y:auto; display:none;}
+  .sheet.show{display:block; transform:translateY(0);}
+  .sheet .hd{display:flex; justify-content:space-between; align-items:center; padding:16px; position:sticky; top:0; background:var(--card); border-bottom:1px solid var(--line);}
+  .sheet .hd h3{margin:0; font-size:17px;}
+  .sheet .hd .close{font-size:22px; color:var(--sub); cursor:pointer; padding:2px 6px;}
+  .sheet .bd{padding:16px;}
+  .delbtn{margin-top:10px; width:100%; padding:12px; border:1px solid var(--red); border-radius:12px; background:transparent; color:var(--red); font-size:15px; cursor:pointer;}
+
+  /* 定期支出列表 */
+  .recur{display:flex; align-items:center; gap:10px; background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px;}
+  .recur .mid{flex:1; min-width:0;}
+  .recur .t1{font-size:14px;} .recur .t2{font-size:12px; color:var(--sub);}
+  .recur .x{color:#6b7280; cursor:pointer; padding:4px 6px;}
 </style>
 </head>
 <body>
@@ -123,6 +157,7 @@
   <div class="page on" id="page-add">
     <h1>💰 記帳本</h1>
     <div class="summary" id="topSummary"></div>
+    <div class="budget" id="budgetBar" style="display:none"></div>
 
     <div class="inputbox">
       <div class="inputrow">
@@ -154,7 +189,15 @@
       </div>
     </div>
 
-    <div class="sectitle"><span>最近紀錄</span><span id="recCount"></span></div>
+    <div class="sectitle"><span>紀錄</span><span id="recCount"></span></div>
+    <div class="searchbar">
+      <input id="searchInput" placeholder="🔍 搜尋分類、備註、支付方式…">
+    </div>
+    <div class="fchips" id="filterChips">
+      <span class="fchip on" data-f="all">全部</span>
+      <span class="fchip" data-f="expense">支出</span>
+      <span class="fchip" data-f="income">收入</span>
+    </div>
     <div id="recentList"></div>
   </div>
 
@@ -210,6 +253,22 @@
     </div>
 
     <div class="setcard">
+      <h3>💰 每月預算</h3>
+      <p class="hint" style="margin-top:0">設定每月支出上限，首頁會顯示「還能花多少」，超支會提醒。留空或填 0 代表不設預算。</p>
+      <div class="rowbtn">
+        <input id="budgetInput" type="number" inputmode="decimal" placeholder="例如：20000">
+        <button onclick="saveBudget()">儲存</button>
+      </div>
+    </div>
+
+    <div class="setcard">
+      <h3>🔁 定期固定支出</h3>
+      <p class="hint" style="margin-top:0">訂閱、房租這種每月固定的，設一次每月自動帶入。</p>
+      <div id="recurList"></div>
+      <button class="obtn full" onclick="openRecurAdd()">＋ 新增定期支出</button>
+    </div>
+
+    <div class="setcard">
       <h3>支出分類</h3>
       <div class="catlist" id="setExpCats"></div>
       <div class="rowbtn">
@@ -249,6 +308,39 @@
 
 </div>
 
+<!-- 編輯紀錄 彈出表單 -->
+<div class="sheetbg" id="sheetBg" onclick="closeSheet()"></div>
+<div class="sheet" id="editSheet">
+  <div class="hd"><h3 id="editTitle">編輯紀錄</h3><span class="close" onclick="closeSheet()">✕</span></div>
+  <div class="bd">
+    <div class="pv-grid">
+      <label>類型</label>
+      <div class="seg" id="edSegType">
+        <button data-t="expense">支出</button>
+        <button data-t="income">收入</button>
+      </div>
+      <label>金額</label>
+      <input class="f" id="edAmount" type="number" inputmode="decimal" placeholder="0">
+      <label>分類</label>
+      <div class="catwrap" id="edCats"></div>
+      <label id="edPayLabel">支付</label>
+      <div class="catwrap" id="edPays"></div>
+      <label>日期</label>
+      <input class="f" id="edDate" type="date">
+      <label>備註</label>
+      <input class="f" id="edNote" type="text" placeholder="（可留空）">
+    </div>
+    <button class="savebtn" onclick="saveEdit()">儲存修改 ✓</button>
+    <button class="delbtn" onclick="deleteFromEdit()">🗑️ 刪除這一筆</button>
+  </div>
+</div>
+
+<!-- 分類明細 彈出清單 -->
+<div class="sheet" id="listSheet">
+  <div class="hd"><h3 id="listTitle">明細</h3><span class="close" onclick="closeSheet()">✕</span></div>
+  <div class="bd" id="listBody"></div>
+</div>
+
 <!-- 底部導覽 -->
 <div class="tabbar">
   <div class="tb on" data-p="add"><span class="i">✏️</span>記帳</div>
@@ -271,6 +363,9 @@ const PAY_ICON={'現金':'💵','信用卡':'💳','LINE Pay':'🟢','Apple Pay'
 let records = load(LS_REC, []);
 let settings = load(LS_SET, JSON.parse(JSON.stringify(DEFAULT_CATS)));
 if(!Array.isArray(settings.pays)) settings.pays=[...DEFAULT_CATS.pays]; // 舊資料補上支付方式
+if(typeof settings.budget!=='number') settings.budget=0;        // 每月預算
+if(typeof settings.budgetAt!=='number') settings.budgetAt=0;    // 預算最後修改時間（同步用）
+if(!Array.isArray(settings.recurring)) settings.recurring=[];   // 定期固定支出
 let tombstones = load(LS_TOMB, []);                 // 刪除紀錄（讓刪除也能同步）
 let cloudCfg = load(LS_CLOUD, {url:'',token:'',auto:true,lastSync:0});
 function load(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}}
@@ -492,21 +587,51 @@ $('mic').onclick=()=>{
 };
 
 /* ============ 最近紀錄 ============ */
+let searchQ='', filterType='all';
 function renderRecent(){
-  const sorted=[...records].sort((a,b)=>b.createdAt-a.createdAt).slice(0,30);
   const box=$('recentList');
-  $('recCount').textContent=records.length?`共 ${records.length} 筆`:'';
-  if(!sorted.length){box.innerHTML='<div class="empty">還沒有任何紀錄<br>打一句話開始記帳吧 ✏️</div>'; return;}
-  box.innerHTML=sorted.map(r=>`
-    <div class="rec">
+  const q=searchQ.trim().toLowerCase();
+  let list=[...records];
+  if(filterType!=='all') list=list.filter(r=>r.type===filterType);
+  if(q) list=list.filter(r=>((r.category||'')+(r.note||'')+(r.pay||'')).toLowerCase().includes(q));
+  list.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const filtered = q || filterType!=='all';
+  const shown = filtered ? list : list.slice(0,30);
+  $('recCount').textContent=records.length?(filtered?`符合 ${list.length} 筆`:`共 ${records.length} 筆`):'';
+  if(!shown.length){box.innerHTML='<div class="empty">'+(records.length?'沒有符合的紀錄':'還沒有任何紀錄<br>打一句話開始記帳吧 ✏️')+'</div>'; return;}
+  box.innerHTML=shown.map(recRowHTML).join('');
+}
+function recRowHTML(r){
+  return `<div class="rec" onclick="openEdit('${r.id}')">
       <div class="ic">${icon(r.category)}</div>
       <div class="mid">
-        <div class="t1">${r.category}${r.note?' · '+esc(r.note):''}</div>
+        <div class="t1">${esc(r.category)}${r.note?' · '+esc(r.note):''}</div>
         <div class="t2">${r.date}${r.pay?' · '+payIcon(r.pay)+' '+esc(r.pay):''}</div>
       </div>
       <div class="amt ${r.type==='income'?'v-in':'v-out'}">${r.type==='income'?'+':'-'}${fmt(r.amount)}</div>
-      <div class="del" onclick="delRec('${r.id}')">✕</div>
-    </div>`).join('');
+      <div class="del" onclick="event.stopPropagation();delRec('${r.id}')">✕</div>
+    </div>`;
+}
+// 搜尋與篩選
+$('searchInput').addEventListener('input',e=>{ searchQ=e.target.value; renderRecent(); });
+document.querySelectorAll('#filterChips .fchip').forEach(c=>{
+  c.onclick=()=>{ filterType=c.dataset.f;
+    document.querySelectorAll('#filterChips .fchip').forEach(x=>x.classList.toggle('on',x===c));
+    renderRecent(); };
+});
+
+// 每月預算進度
+function renderBudget(){
+  const el=$('budgetBar'); const b=settings.budget||0;
+  if(!b){ el.style.display='none'; return; }
+  const now=new Date(), mk=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  let exp=0; records.forEach(r=>{ if(r.type==='expense' && (r.date||'').startsWith(mk)) exp+=r.amount; });
+  const left=b-exp, pct=Math.min(100, b? exp/b*100 : 0), over=exp>b;
+  const color = over?'#f87171' : (pct>80?'#fbbf24':'#34d399');
+  el.style.display='block'; el.classList.toggle('over',over);
+  el.innerHTML=`<div class="row"><span class="left">本月預算 ${fmt(b)}</span>
+    <span class="right">${over?'超支 '+fmt(-left):'還能花 '+fmt(left)}</span></div>
+    <div class="track"><div class="fill" style="width:${pct}%;background:${color}"></div></div>`;
 }
 function delRec(id){ if(!confirm('刪除這一筆？'))return;
   records=records.filter(r=>r.id!==id);
@@ -568,8 +693,8 @@ function renderPayBreak(byPay,total){
   box.innerHTML=entries.map((e,i)=>{
     const col=PIE_COLORS[i%PIE_COLORS.length];
     const pct=Math.round(e[1]/total*100);
-    return `<div class="pb-row">
-      <div class="pb-top"><span class="nm">${payIcon(e[0])} ${esc(e[0])}</span>
+    return `<div class="pb-row" style="cursor:pointer" onclick="openDetail(r=>r.type==='expense'&&(r.pay||'其他')===${JSON.stringify(e[0])}, ${JSON.stringify(payIcon(e[0])+' '+e[0]+' 明細')})">
+      <div class="pb-top"><span class="nm">${payIcon(e[0])} ${esc(e[0])}　›</span>
       <span class="amt">${fmt(e[1])} <span style="color:var(--sub);font-weight:400">· ${pct}%</span></span></div>
       <div class="pb-bar"><div class="pb-fill" style="width:${Math.max(3,e[1]/max*100)}%;background:${col}"></div></div>
     </div>`;
@@ -598,8 +723,9 @@ function drawPie(byCat,total){
   ctx.fillStyle='#e8eaed'; ctx.textAlign='center'; ctx.font='bold 20px sans-serif';
   ctx.fillText(fmt(total),cx,cy+2); ctx.fillStyle='#9aa3b2'; ctx.font='12px sans-serif'; ctx.fillText('總支出',cx,cy+20);
   $('pieLegend').innerHTML=entries.map((e,i)=>`
-    <div class="lg"><span class="dot" style="background:${PIE_COLORS[i%PIE_COLORS.length]}"></span>
-    <span class="nm">${icon(e[0])} ${e[0]}</span>
+    <div class="lg" style="cursor:pointer" onclick="openDetail(r=>r.type==='expense'&&r.category===${JSON.stringify(e[0])}, ${JSON.stringify(icon(e[0])+' '+e[0]+' 明細')})">
+    <span class="dot" style="background:${PIE_COLORS[i%PIE_COLORS.length]}"></span>
+    <span class="nm">${icon(e[0])} ${esc(e[0])}　›</span>
     <span class="pc">${fmt(e[1])} · ${Math.round(e[1]/total*100)}%</span></div>`).join('');
 }
 
@@ -743,6 +869,17 @@ function mergeSettings(localS, cloudS){
     [...(cloudS[k]||[]),...(localS[k]||[])].forEach(x=>{ if(x&&!seen.has(x)){seen.add(x); arr.push(x);} });
     out[k]=arr.filter(x=>x!=='其他').concat(arr.includes('其他')?['其他']:[]); // 其他固定排最後
   });
+  // 預算：以最後修改時間較新者為準
+  if((cloudS.budgetAt||0) > (localS.budgetAt||0)){ out.budget=cloudS.budget||0; out.budgetAt=cloudS.budgetAt||0; }
+  else { out.budget=localS.budget||0; out.budgetAt=localS.budgetAt||0; }
+  // 定期支出：以 id 聯集，updatedAt 較新者勝；刪除用 deleted 旗標
+  const rmap={};
+  [...(cloudS.recurring||[]),...(localS.recurring||[])].forEach(r=>{
+    if(!r||!r.id) return;
+    const u=+r.updatedAt||0; const cur=rmap[r.id];
+    if(!cur || (+cur.updatedAt||0)<u) rmap[r.id]=r;
+  });
+  out.recurring=Object.values(rmap); // 保留 deleted 標記，刪除才能同步；顯示/產生時才過濾
   return out;
 }
 
@@ -765,6 +902,7 @@ async function cloudSync(silent){
     if(pj.error) throw new Error(pj.error);
     records=merged.records; tombstones=merged.tombstones; settings=mergedSettings;
     save();
+    generateRecurring(); // 同步後若有新的定期設定，補上本月該產生的
     cloudCfg.lastSync=Date.now(); saveCloudCfg();
     renderAll(); renderSetCats();
     setSyncStatus('上次同步：'+fmtTime(cloudCfg.lastSync));
@@ -789,6 +927,141 @@ function renderCloudCfg(){
   setSyncStatus(cloudCfg.lastSync?('上次同步：'+fmtTime(cloudCfg.lastSync)):'尚未同步');
 }
 
+/* ============ 彈出表單共用 ============ */
+function openSheet(id){ document.querySelectorAll('.sheet').forEach(s=>s.classList.remove('show')); $('sheetBg').classList.add('show'); $(id).classList.add('show'); }
+function closeSheet(){ $('sheetBg').classList.remove('show'); document.querySelectorAll('.sheet').forEach(s=>s.classList.remove('show')); }
+
+/* ============ 編輯紀錄 ============ */
+let editId=null, edDraft=null;
+function openEdit(id){
+  const r=records.find(x=>x.id===id); if(!r) return;
+  editId=id; edDraft={...r};
+  $('edAmount').value=r.amount; $('edDate').value=r.date; $('edNote').value=r.note||'';
+  renderEdSeg(); renderEdCats(); renderEdPays();
+  openSheet('editSheet');
+}
+function renderEdSeg(){
+  document.querySelectorAll('#edSegType button').forEach(b=>{
+    b.className=''; if(b.dataset.t===edDraft.type) b.classList.add(edDraft.type==='income'?'on-in':'on-out');
+  });
+}
+function renderEdCats(){
+  const wrap=$('edCats'); wrap.innerHTML='';
+  if(!settings[edDraft.type].includes(edDraft.category)) edDraft.category=settings[edDraft.type][0];
+  settings[edDraft.type].forEach(c=>{
+    const el=document.createElement('div'); el.className='cat'+(c===edDraft.category?' sel':'');
+    el.textContent=(CAT_ICON[c]?CAT_ICON[c]+' ':'')+c;
+    el.onclick=()=>{edDraft.category=c; renderEdCats();}; wrap.appendChild(el);
+  });
+}
+function renderEdPays(){
+  const show=edDraft.type==='expense';
+  $('edPayLabel').style.display=show?'':'none'; $('edPays').style.display=show?'':'none';
+  if(!show) return;
+  const wrap=$('edPays'); wrap.innerHTML='';
+  if(!settings.pays.includes(edDraft.pay)) edDraft.pay=settings.pays[0];
+  settings.pays.forEach(p=>{
+    const el=document.createElement('div'); el.className='cat'+(p===edDraft.pay?' sel':'');
+    el.textContent=(PAY_ICON[p]?PAY_ICON[p]+' ':'')+p;
+    el.onclick=()=>{edDraft.pay=p; renderEdPays();}; wrap.appendChild(el);
+  });
+}
+document.querySelectorAll('#edSegType button').forEach(b=>{
+  b.onclick=()=>{edDraft.type=b.dataset.t;
+    if(!settings[edDraft.type].includes(edDraft.category)) edDraft.category=settings[edDraft.type][0];
+    renderEdSeg(); renderEdCats(); renderEdPays();};
+});
+function saveEdit(){
+  const amt=parseFloat($('edAmount').value);
+  if(!amt||amt<=0){toast('請輸入金額'); return;}
+  const r=records.find(x=>x.id===editId); if(!r){closeSheet();return;}
+  r.type=edDraft.type; r.amount=amt; r.category=edDraft.category;
+  r.pay=edDraft.type==='expense'?edDraft.pay:'';
+  r.date=$('edDate').value||r.date; r.note=$('edNote').value.trim(); r.updatedAt=Date.now();
+  save(); closeSheet(); renderAll();
+  if($('page-report').classList.contains('on')) renderReport();
+  toast('已更新 ✓'); autoSync();
+}
+function deleteFromEdit(){ const id=editId; closeSheet(); if(id) delRec(id); }
+
+/* ============ 明細下鑽 ============ */
+function openDetail(filterFn,title){
+  const rs=records.filter(r=>inRange(r.date)).filter(filterFn).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const total=rs.reduce((s,r)=>s+r.amount,0);
+  $('listTitle').textContent=title;
+  $('listBody').innerHTML=`<div class="hint" style="margin:0 0 10px">${rs.length} 筆 · 合計 ${fmt(total)}</div>`
+    +(rs.length?rs.map(recRowHTML).join(''):'<div class="empty">沒有紀錄</div>');
+  openSheet('listSheet');
+}
+
+/* ============ 每月預算設定 ============ */
+function saveBudget(){
+  const v=parseFloat($('budgetInput').value)||0;
+  settings.budget=v<0?0:v; settings.budgetAt=Date.now();
+  save(); renderBudget(); toast('已儲存預算'); autoSync();
+}
+
+/* ============ 定期固定支出 ============ */
+function renderRecurList(){
+  const box=$('recurList'); if(!box) return;
+  const list=(settings.recurring||[]).filter(r=>!r.deleted);
+  box.innerHTML=list.length?list.map(r=>`<div class="recur">
+      <div class="ic" style="width:34px;height:34px;flex:0 0 34px;display:flex;align-items:center;justify-content:center;font-size:18px">${icon(r.category)}</div>
+      <div class="mid"><div class="t1">${esc(r.name)} · ${fmt(r.amount)}</div>
+      <div class="t2">每月 ${r.day} 號 · ${esc(r.category)}${r.pay?' · '+esc(r.pay):''}</div></div>
+      <div class="x" onclick="delRecur('${r.id}')">✕</div></div>`).join('')
+    :'<div class="hint" style="margin:0 0 8px">尚未設定</div>';
+}
+function openRecurAdd(){
+  $('listTitle').textContent='新增定期支出';
+  $('listBody').innerHTML=`<div class="pv-grid">
+    <label>名稱</label><input class="f" id="rcName" placeholder="例如：Netflix、房租">
+    <label>金額</label><input class="f" id="rcAmount" type="number" inputmode="decimal" placeholder="0">
+    <label>分類</label><select class="f" id="rcCat">${settings.expense.map(c=>`<option>${c}</option>`).join('')}</select>
+    <label>支付</label><select class="f" id="rcPay">${settings.pays.map(p=>`<option>${p}</option>`).join('')}</select>
+    <label>每月幾號</label><input class="f" id="rcDay" type="number" min="1" max="28" value="1">
+    </div><button class="savebtn" onclick="addRecur()">新增 ✓</button>`;
+  openSheet('listSheet');
+  if(settings.expense.includes('訂閱')) $('rcCat').value='訂閱';
+}
+function addRecur(){
+  const name=$('rcName').value.trim(), amt=parseFloat($('rcAmount').value);
+  const day=Math.min(28,Math.max(1,parseInt($('rcDay').value)||1));
+  if(!name){toast('請填名稱'); return;}
+  if(!amt||amt<=0){toast('請填金額'); return;}
+  settings.recurring.push({id:'rc'+Date.now()+Math.floor(Math.random()*999),
+    name, amount:amt, category:$('rcCat').value, pay:$('rcPay').value, day, type:'expense', updatedAt:Date.now()});
+  save(); closeSheet(); renderRecurList();
+  generateRecurring(); renderAll(); toast('已新增定期支出'); autoSync();
+}
+function delRecur(id){
+  if(!confirm('刪除這個定期支出？已產生的紀錄不受影響')) return;
+  const r=(settings.recurring||[]).find(x=>x.id===id);
+  if(r){ r.deleted=true; r.updatedAt=Date.now(); } // 標記刪除以便同步，不直接移除
+  save(); renderRecurList(); autoSync();
+}
+// 依定期設定，自動補上本月該產生的紀錄（同月同項用固定 id，跨裝置不重複）
+function generateRecurring(){
+  const list=(settings.recurring||[]).filter(r=>!r.deleted);
+  if(!list.length) return 0;
+  const now=new Date(), y=now.getFullYear(), m=now.getMonth();
+  const mk=y+'-'+String(m+1).padStart(2,'0'), dim=new Date(y,m+1,0).getDate();
+  let added=0;
+  list.forEach(rc=>{
+    const day=Math.min(rc.day||1, dim);
+    if(now.getDate()<day) return;                 // 還沒到號數
+    const id='rec_'+rc.id+'_'+mk;
+    if(records.some(r=>r.id===id)) return;         // 已產生
+    if(tombstones.some(t=>t.id===id)) return;      // 被手動刪過就不再產生
+    const ts=Date.now();
+    records.push({id, type:'expense', amount:rc.amount, category:rc.category, pay:rc.pay||'',
+      date:mk+'-'+String(day).padStart(2,'0'), note:rc.name, createdAt:ts, updatedAt:ts});
+    added++;
+  });
+  if(added) save();
+  return added;
+}
+
 /* ============ 分頁切換 ============ */
 document.querySelectorAll('.tabbar .tb').forEach(t=>{
   t.onclick=()=>{
@@ -797,7 +1070,7 @@ document.querySelectorAll('.tabbar .tb').forEach(t=>{
     document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('on'));
     $('page-'+p).classList.add('on');
     if(p==='report') renderReport();
-    if(p==='set'){ renderSetCats(); renderCloudCfg(); }
+    if(p==='set'){ renderSetCats(); renderCloudCfg(); renderRecurList(); $('budgetInput').value=settings.budget||''; }
     window.scrollTo(0,0);
   };
 });
@@ -806,7 +1079,8 @@ document.querySelectorAll('.tabbar .tb').forEach(t=>{
 let toastTimer=null;
 function toast(msg){const t=$('toast'); t.textContent=msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1800);}
-function renderAll(){renderTopSummary(); renderRecent();}
+function renderAll(){renderTopSummary(); renderBudget(); renderRecent();}
+generateRecurring(); // 依定期設定補上本月該產生的紀錄
 renderAll();
 // 開啟 App 時，若已設定雲端就自動拉一次最新資料
 if(cloudCfg.url && cloudCfg.auto!==false) cloudSync(true);
