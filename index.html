@@ -248,6 +248,7 @@
         </label>
         <button class="obtn full" onclick="saveCloudFromUI()">💾 儲存設定並同步</button>
         <button class="obtn full" onclick="cloudSync(false)">🔄 立即同步</button>
+        <button class="obtn full" onclick="makeSetupLink()">📌 產生我的專屬連結（防資料被清掉）</button>
         <div class="hint" id="syncStatus" style="text-align:center; margin-top:2px;">尚未同步</div>
       </div>
     </div>
@@ -371,6 +372,16 @@ let cloudCfg = load(LS_CLOUD, {url:'',token:'',auto:true,lastSync:0});
 function load(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}}
 function save(){localStorage.setItem(LS_REC,JSON.stringify(records));localStorage.setItem(LS_SET,JSON.stringify(settings));localStorage.setItem(LS_TOMB,JSON.stringify(tombstones));}
 function saveCloudCfg(){localStorage.setItem(LS_CLOUD,JSON.stringify(cloudCfg));}
+// 若用「專屬連結」打開（網址 #s=...），自動帶回同步設定，免得清資料後要重設
+(function applyHashConfig(){
+  try{
+    const m=(location.hash||'').match(/[#&]s=([^&]+)/);
+    if(!m) return;
+    const cfg=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
+    if(cfg && cfg.u){ cloudCfg.url=cfg.u; cloudCfg.token=cfg.t||''; cloudCfg.auto=cfg.a!==false; saveCloudCfg(); }
+    history.replaceState(null,'',location.pathname+location.search); // 清掉網址上的設定字串
+  }catch(e){}
+})();
 function icon(c){return CAT_ICON[c]||'•';}
 function payIcon(p){return PAY_ICON[p]||'💳';}
 // 把支付名稱拆成中文／英數詞（長度≥2），用來比對簡稱
@@ -926,6 +937,18 @@ function renderCloudCfg(){
   $('cfgAuto').checked=cloudCfg.auto!==false;
   setSyncStatus(cloudCfg.lastSync?('上次同步：'+fmtTime(cloudCfg.lastSync)):'尚未同步');
 }
+// 產生「專屬連結」：把同步設定編在網址的 # 後面（# 後的內容不會送到伺服器，只留在你裝置）
+function makeSetupLink(){
+  if(!cloudCfg.url){ toast('請先填網址並儲存'); return; }
+  const payload=btoa(unescape(encodeURIComponent(JSON.stringify({u:cloudCfg.url,t:cloudCfg.token||'',a:cloudCfg.auto!==false}))));
+  const link=location.origin+location.pathname+'#s='+encodeURIComponent(payload);
+  if(navigator.clipboard) navigator.clipboard.writeText(link).then(()=>toast('已複製專屬連結')).catch(()=>{});
+  $('listTitle').textContent='📌 我的專屬連結';
+  $('listBody').innerHTML=`<p class="hint" style="margin-top:0">把這個連結<b>加到書籤或主畫面</b>。日後就算瀏覽器清掉資料，用它打開就會自動帶回同步設定，不用再手動輸入。</p>
+    <textarea class="f" style="width:100%;height:100px" readonly onclick="this.select()">${esc(link)}</textarea>
+    <button class="obtn full" onclick='navigator.clipboard&&navigator.clipboard.writeText(${JSON.stringify(link)});toast("已複製")'>📋 複製連結</button>`;
+  openSheet('listSheet');
+}
 
 /* ============ 彈出表單共用 ============ */
 function openSheet(id){ document.querySelectorAll('.sheet').forEach(s=>s.classList.remove('show')); $('sheetBg').classList.add('show'); $(id).classList.add('show'); }
@@ -1008,29 +1031,46 @@ function renderRecurList(){
   box.innerHTML=list.length?list.map(r=>`<div class="recur">
       <div class="ic" style="width:34px;height:34px;flex:0 0 34px;display:flex;align-items:center;justify-content:center;font-size:18px">${icon(r.category)}</div>
       <div class="mid"><div class="t1">${esc(r.name)} · ${fmt(r.amount)}</div>
-      <div class="t2">每月 ${r.day} 號 · ${esc(r.category)}${r.pay?' · '+esc(r.pay):''}</div></div>
+      <div class="t2">${recurWhen(r)} · ${esc(r.category)}${r.pay?' · '+esc(r.pay):''}</div></div>
       <div class="x" onclick="delRecur('${r.id}')">✕</div></div>`).join('')
     :'<div class="hint" style="margin:0 0 8px">尚未設定</div>';
+}
+function recurWhen(r){
+  return (r.freq==='yearly') ? `每年 ${r.month||1}/${r.day} 繳` : `每月 ${r.day} 號`;
 }
 function openRecurAdd(){
   $('listTitle').textContent='新增定期支出';
   $('listBody').innerHTML=`<div class="pv-grid">
-    <label>名稱</label><input class="f" id="rcName" placeholder="例如：Netflix、房租">
+    <label>名稱</label><input class="f" id="rcName" placeholder="例如：Netflix、房租、保險">
     <label>金額</label><input class="f" id="rcAmount" type="number" inputmode="decimal" placeholder="0">
+    <label>頻率</label><select class="f" id="rcFreq" onchange="toggleRcMonth()">
+      <option value="monthly">每月（月繳）</option>
+      <option value="yearly">每年（年繳）</option></select>
+    <label id="rcMonthLabel" style="display:none">月份</label>
+    <select class="f" id="rcMonth" style="display:none">${Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1} 月</option>`).join('')}</select>
+    <label id="rcDayLabel">每月幾號</label><input class="f" id="rcDay" type="number" min="1" max="28" value="1">
     <label>分類</label><select class="f" id="rcCat">${settings.expense.map(c=>`<option>${c}</option>`).join('')}</select>
     <label>支付</label><select class="f" id="rcPay">${settings.pays.map(p=>`<option>${p}</option>`).join('')}</select>
-    <label>每月幾號</label><input class="f" id="rcDay" type="number" min="1" max="28" value="1">
     </div><button class="savebtn" onclick="addRecur()">新增 ✓</button>`;
   openSheet('listSheet');
   if(settings.expense.includes('訂閱')) $('rcCat').value='訂閱';
 }
+function toggleRcMonth(){
+  const y=$('rcFreq').value==='yearly';
+  $('rcMonthLabel').style.display=y?'':'none';
+  $('rcMonth').style.display=y?'':'none';
+  $('rcDayLabel').textContent=y?'幾號':'每月幾號';
+}
 function addRecur(){
   const name=$('rcName').value.trim(), amt=parseFloat($('rcAmount').value);
   const day=Math.min(28,Math.max(1,parseInt($('rcDay').value)||1));
+  const freq=$('rcFreq').value==='yearly'?'yearly':'monthly';
+  const month=Math.min(12,Math.max(1,parseInt($('rcMonth').value)||1));
   if(!name){toast('請填名稱'); return;}
   if(!amt||amt<=0){toast('請填金額'); return;}
   settings.recurring.push({id:'rc'+Date.now()+Math.floor(Math.random()*999),
-    name, amount:amt, category:$('rcCat').value, pay:$('rcPay').value, day, type:'expense', updatedAt:Date.now()});
+    name, amount:amt, category:$('rcCat').value, pay:$('rcPay').value,
+    freq, day, month:(freq==='yearly'?month:undefined), type:'expense', updatedAt:Date.now()});
   save(); closeSheet(); renderRecurList();
   generateRecurring(); renderAll(); toast('已新增定期支出'); autoSync();
 }
@@ -1040,23 +1080,33 @@ function delRecur(id){
   if(r){ r.deleted=true; r.updatedAt=Date.now(); } // 標記刪除以便同步，不直接移除
   save(); renderRecurList(); autoSync();
 }
-// 依定期設定，自動補上本月該產生的紀錄（同月同項用固定 id，跨裝置不重複）
+// 依定期設定自動補上該產生的紀錄。月繳用 id rec_<id>_<YYYY-MM>、年繳用 recY_<id>_<YYYY>，跨裝置不重複
 function generateRecurring(){
   const list=(settings.recurring||[]).filter(r=>!r.deleted);
   if(!list.length) return 0;
   const now=new Date(), y=now.getFullYear(), m=now.getMonth();
-  const mk=y+'-'+String(m+1).padStart(2,'0'), dim=new Date(y,m+1,0).getDate();
   let added=0;
-  list.forEach(rc=>{
-    const day=Math.min(rc.day||1, dim);
-    if(now.getDate()<day) return;                 // 還沒到號數
-    const id='rec_'+rc.id+'_'+mk;
+  const push=(id,dateStr,rc)=>{
     if(records.some(r=>r.id===id)) return;         // 已產生
     if(tombstones.some(t=>t.id===id)) return;      // 被手動刪過就不再產生
     const ts=Date.now();
     records.push({id, type:'expense', amount:rc.amount, category:rc.category, pay:rc.pay||'',
-      date:mk+'-'+String(day).padStart(2,'0'), note:rc.name, createdAt:ts, updatedAt:ts});
+      date:dateStr, note:rc.name, createdAt:ts, updatedAt:ts});
     added++;
+  };
+  list.forEach(rc=>{
+    if(rc.freq==='yearly'){
+      const mon=Math.min(12,Math.max(1,rc.month||1))-1;
+      const dim=new Date(y,mon+1,0).getDate();
+      const day=Math.min(rc.day||1, dim);
+      if(now < new Date(y,mon,day)) return;        // 今年還沒到那天
+      push('recY_'+rc.id+'_'+y, y+'-'+String(mon+1).padStart(2,'0')+'-'+String(day).padStart(2,'0'), rc);
+    }else{
+      const mk=y+'-'+String(m+1).padStart(2,'0'), dim=new Date(y,m+1,0).getDate();
+      const day=Math.min(rc.day||1, dim);
+      if(now.getDate()<day) return;                // 還沒到號數
+      push('rec_'+rc.id+'_'+mk, mk+'-'+String(day).padStart(2,'0'), rc);
+    }
   });
   if(added) save();
   return added;
